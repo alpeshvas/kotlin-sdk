@@ -5,6 +5,7 @@ import io.modelcontextprotocol.kotlin.sdk.CallToolRequest
 import io.modelcontextprotocol.kotlin.sdk.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.TextContent
 import io.modelcontextprotocol.kotlin.sdk.Tool
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -16,6 +17,7 @@ import kotlin.reflect.KClass
 import kotlin.reflect.KFunction
 import kotlin.reflect.KParameter
 import kotlin.reflect.KType
+import kotlin.reflect.full.callSuspend
 import kotlin.reflect.full.findAnnotation
 import kotlin.reflect.full.hasAnnotation
 import kotlin.reflect.full.instanceParameter
@@ -39,8 +41,6 @@ public inline fun <reified T : Any> Server.registerAnnotatedTools(instance: T) {
         .filter { it.hasAnnotation<McpTool>() }
         .forEach { function ->
             val annotation = function.findAnnotation<McpTool>()!!
-//            val functionResult = function.call(instance, 2.0, 3.0)
-//            print(functionResult)
             registerToolFromAnnotatedFunction(instance, function, annotation)
         }
 }
@@ -100,6 +100,9 @@ public fun <T : Any> Server.registerToolFromAnnotatedFunction(
         required = required
     )
     
+    // Check if the function is a suspend function
+    val isSuspend = function.isSuspend
+    
     // Add the tool with a handler that calls the annotated function
     addTool(
         name = name,
@@ -107,33 +110,40 @@ public fun <T : Any> Server.registerToolFromAnnotatedFunction(
         inputSchema = inputSchema
     ) { request ->
         try {
+            // Use reflection to call the annotated function with the provided arguments
+            val result = try {
+                val arguments = mutableMapOf<KParameter, Any?>()
 
-             // Use reflection to call the annotated function with the provided arguments
-             val result = try {
-                 val arguments = mutableMapOf<KParameter, Any?>()
+                // Map instance parameter if required
+                function.instanceParameter?.let { arguments[it] = instance }
 
-                 // Map instance parameter if required
-                 function.instanceParameter?.let { arguments[it] = instance }
+                // Map value parameters
+                function.valueParameters.forEach { param ->
+                    val paramName = param.name ?: "param${param.index}"
+                    val jsonValue = request.arguments[paramName]
+                    // Use the provided value or the default value if the parameter is optional
+                    if (jsonValue != null) {
+                        arguments[param] = convertJsonValueToKotlinType(jsonValue, param.type)
+                    } else if (!param.isOptional) {
+                        throw IllegalArgumentException("Missing required parameter: $paramName")
+                    }
+                }
 
-                 // Map value parameters
-                 function.valueParameters.forEach { param ->
-                     val paramName = param.name ?: "param${param.index}"
-                     val jsonValue = request.arguments[paramName]
-                     // Use the provided value or the default value if the parameter is optional
-                     if (jsonValue != null) {
-                         arguments[param] = convertJsonValueToKotlinType(jsonValue, param.type)
-                     } else if (!param.isOptional) {
-                         throw IllegalArgumentException("Missing required parameter: $paramName")
-                     }
-                 }
-
-                 // Call the function using callBy
-                 function.callBy(arguments)
-             } catch (e: IllegalArgumentException) {
-                 throw IllegalArgumentException("Error invoking function ${function.name}: ${e.message}", e)
-             } catch (e: InvocationTargetException) {
-                 throw e.targetException
-             }
+                // Call the function using callBy
+                if (isSuspend) {
+                    // Call suspend function using runBlocking
+                    runBlocking {
+                        function.callSuspend(arguments)
+                    }
+                } else {
+                    // Call regular function
+                    function.callBy(arguments)
+                }
+            } catch (e: IllegalArgumentException) {
+                throw IllegalArgumentException("Error invoking function ${function.name}: ${e.message}", e)
+            } catch (e: InvocationTargetException) {
+                throw e.targetException
+            }
 
             // Handle the result
             when (result) {
@@ -148,7 +158,7 @@ public fun <T : Any> Server.registerToolFromAnnotatedFunction(
             }
         } catch (e: Exception) {
             CallToolResult(
-                content = listOf(TextContent("Error executing tool: ${e.message}")),
+                content = listOf(TextContent("Error executing tool: ${e.stackTraceToString()}")),
                 isError = true
             )
         }

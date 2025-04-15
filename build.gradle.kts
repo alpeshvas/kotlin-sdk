@@ -17,8 +17,8 @@ plugins {
     alias(libs.plugins.kotlinx.binary.compatibility.validator)
 }
 
-group = "io.modelcontextprotocol"
-version = "0.4.0"
+group = "io.modelcontextprotocooool"
+version = "0.5.0"
 
 val mainSourcesJar = tasks.register<Jar>("mainSourcesJar") {
     archiveClassifier = "sources"
