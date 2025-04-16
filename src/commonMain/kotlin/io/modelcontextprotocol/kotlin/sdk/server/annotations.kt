@@ -46,10 +46,19 @@ public annotation class McpTool(
  * }
  * ```
  */
+
+public enum class Type {
+    STRING,
+    NUMBER,
+    BOOLEAN,
+    OBJECT,
+    ARRAY,
+    NOT_DEFINED
+}
 @Target(AnnotationTarget.VALUE_PARAMETER)
 @Retention(AnnotationRetention.RUNTIME)
 public annotation class McpParam(
     val description: String = "",
-    val type: String = "", // Can be overridden, otherwise inferred from Kotlin type
+    val type: Type = Type.NOT_DEFINED, // Can be overridden, otherwise inferred from Kotlin type
     val required: Boolean = true
 )

@@ -68,7 +68,7 @@ public fun <T : Any> Server.registerToolFromAnnotatedFunction(
             
             putJsonObject(paramName) {
                 val type = when {
-                    paramAnnotation != null && paramAnnotation.type.isNotEmpty() -> paramAnnotation.type
+                    paramAnnotation != null && paramAnnotation.type != Type.NOT_DEFINED -> paramAnnotation.type.name.lowercase()
                     // Infer type from Kotlin parameter type
                     else -> inferJsonSchemaType(param.type)
                 }
