@@ -56,6 +56,9 @@ public open class Server(
     private val prompts = mutableMapOf<String, RegisteredPrompt>()
     private val resources = mutableMapOf<String, RegisteredResource>()
 
+    // Map to store suspend function handlers
+    private val suspendTools = mutableMapOf<String, suspend (CallToolRequest) -> CallToolResult>()
+
     init {
         logger.debug { "Initializing MCP server with capabilities: $capabilities" }
 
@@ -153,6 +156,45 @@ public open class Server(
         }
         logger.info { "Registering tool: $name" }
         tools[name] = RegisteredTool(Tool(name, description, inputSchema), handler)
+    }
+
+    /**
+     * Adds a tool that can handle suspend functions without blocking
+     *
+     * @param name The name of the tool
+     * @param description A description of what the tool does
+     * @param inputSchema The schema for the tool's input
+     * @param handler A suspend function that handles the tool call
+     */
+    public fun addSuspendTool(
+        name: String,
+        description: String,
+        inputSchema: Tool.Input,
+        handler: suspend (CallToolRequest) -> CallToolResult
+    ) {
+        val tool = Tool(name, description, inputSchema)
+        suspendTools[name] = handler
+        tools[name] = RegisteredTool(tool, handler)
+    }
+
+    /**
+     * Calls a tool with the given request, handling both regular and suspend tools
+     *
+     * @param request The tool call request
+     * @return The result of the tool call
+     */
+    public suspend fun callTool(request: CallToolRequest): CallToolResult {
+        val toolName = request.name
+
+        // Check if the tool is a suspend tool
+        val suspendHandler = suspendTools[toolName]
+        if (suspendHandler != null) {
+            return suspendHandler(request)
+        }
+
+        // Fall back to regular tool handler
+        val handler = tools[toolName]?.handler ?: throw IllegalArgumentException("Tool not found: $toolName")
+        return handler(request)
     }
 
     /**
@@ -384,13 +426,7 @@ public open class Server(
 
     internal suspend fun handleCallTool(request: CallToolRequest): CallToolResult {
         logger.debug { "Handling tool call request for tool: ${request.name}" }
-        val tool = tools[request.name]
-            ?: run {
-                logger.error { "Tool not found: ${request.name}" }
-                throw IllegalArgumentException("Tool not found: ${request.name}")
-            }
-        logger.trace { "Executing tool ${request.name} with input: ${request.arguments}" }
-        return tool.handler(request)
+        return callTool(request)
     }
 
     private suspend fun handleListPrompts(): ListPromptsResult {
@@ -585,3 +621,4 @@ public data class RegisteredResource(
     val resource: Resource,
     val readHandler: suspend (ReadResourceRequest) -> ReadResourceResult
 )
+

@@ -87,7 +87,7 @@ class ServerAnnotationsTest {
             description = "Test explicit type overrides"
         )
         fun testTypeOverride(
-            @McpParam(description = "Parameter with explicit type", type = "object")
+            @McpParam(description = "Parameter with explicit type", type = Type.OBJECT)
             complexParam: String
         ): String {
             return "Received parameter: $complexParam"

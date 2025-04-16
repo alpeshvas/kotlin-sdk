@@ -103,64 +103,111 @@ public fun <T : Any> Server.registerToolFromAnnotatedFunction(
     // Check if the function is a suspend function
     val isSuspend = function.isSuspend
     
-    // Add the tool with a handler that calls the annotated function
-    addTool(
-        name = name,
-        description = description,
-        inputSchema = inputSchema
-    ) { request ->
-        try {
-            // Use reflection to call the annotated function with the provided arguments
-            val result = try {
-                val arguments = mutableMapOf<KParameter, Any?>()
+    if (isSuspend) {
+        // Use addSuspendTool for suspend functions
+        addSuspendTool(
+            name = name,
+            description = description,
+            inputSchema = inputSchema
+        ) { request ->
+            try {
+                // Use reflection to call the annotated function with the provided arguments
+                val result = try {
+                    val arguments = mutableMapOf<KParameter, Any?>()
 
-                // Map instance parameter if required
-                function.instanceParameter?.let { arguments[it] = instance }
+                    // Map instance parameter if required
+                    function.instanceParameter?.let { arguments[it] = instance }
 
-                // Map value parameters
-                function.valueParameters.forEach { param ->
-                    val paramName = param.name ?: "param${param.index}"
-                    val jsonValue = request.arguments[paramName]
-                    // Use the provided value or the default value if the parameter is optional
-                    if (jsonValue != null) {
-                        arguments[param] = convertJsonValueToKotlinType(jsonValue, param.type)
-                    } else if (!param.isOptional) {
-                        throw IllegalArgumentException("Missing required parameter: $paramName")
+                    // Map value parameters
+                    function.valueParameters.forEach { param ->
+                        val paramName = param.name ?: "param${param.index}"
+                        val jsonValue = request.arguments[paramName]
+                        // Use the provided value or the default value if the parameter is optional
+                        if (jsonValue != null) {
+                            arguments[param] = convertJsonValueToKotlinType(jsonValue, param.type)
+                        } else if (!param.isOptional) {
+                            throw IllegalArgumentException("Missing required parameter: $paramName")
+                        }
                     }
+
+                    // Call suspend function directly with callSuspend
+                    function.callSuspend(arguments)
+                } catch (e: IllegalArgumentException) {
+                    throw IllegalArgumentException("Error invoking function ${function.name}: ${e.message}", e)
+                } catch (e: InvocationTargetException) {
+                    throw e.targetException
                 }
 
-                // Call the function using callBy
-                if (isSuspend) {
-                    // Call suspend function using runBlocking
-                    runBlocking {
-                        function.callSuspend(arguments)
+                // Handle the result
+                when (result) {
+                    is CallToolResult -> result
+                    is String -> CallToolResult(content = listOf(TextContent(result)))
+                    is List<*> -> {
+                        val textContent = result.filterIsInstance<String>().map { TextContent(it) }
+                        CallToolResult(content = textContent)
                     }
-                } else {
+                    null -> CallToolResult(content = listOf(TextContent("Operation completed successfully")))
+                    else -> CallToolResult(content = listOf(TextContent(result.toString())))
+                }
+            } catch (e: Exception) {
+                CallToolResult(
+                    content = listOf(TextContent("Error executing tool: ${e.stackTraceToString()}")),
+                    isError = true
+                )
+            }
+        }
+    } else {
+        // Use regular addTool for non-suspend functions
+        addTool(
+            name = name,
+            description = description,
+            inputSchema = inputSchema
+        ) { request ->
+            try {
+                // Use reflection to call the annotated function with the provided arguments
+                val result = try {
+                    val arguments = mutableMapOf<KParameter, Any?>()
+
+                    // Map instance parameter if required
+                    function.instanceParameter?.let { arguments[it] = instance }
+
+                    // Map value parameters
+                    function.valueParameters.forEach { param ->
+                        val paramName = param.name ?: "param${param.index}"
+                        val jsonValue = request.arguments[paramName]
+                        // Use the provided value or the default value if the parameter is optional
+                        if (jsonValue != null) {
+                            arguments[param] = convertJsonValueToKotlinType(jsonValue, param.type)
+                        } else if (!param.isOptional) {
+                            throw IllegalArgumentException("Missing required parameter: $paramName")
+                        }
+                    }
+
                     // Call regular function
                     function.callBy(arguments)
+                } catch (e: IllegalArgumentException) {
+                    throw IllegalArgumentException("Error invoking function ${function.name}: ${e.message}", e)
+                } catch (e: InvocationTargetException) {
+                    throw e.targetException
                 }
-            } catch (e: IllegalArgumentException) {
-                throw IllegalArgumentException("Error invoking function ${function.name}: ${e.message}", e)
-            } catch (e: InvocationTargetException) {
-                throw e.targetException
-            }
 
-            // Handle the result
-            when (result) {
-                is CallToolResult -> result
-                is String -> CallToolResult(content = listOf(TextContent(result)))
-                is List<*> -> {
-                    val textContent = result.filterIsInstance<String>().map { TextContent(it) }
-                    CallToolResult(content = textContent)
+                // Handle the result
+                when (result) {
+                    is CallToolResult -> result
+                    is String -> CallToolResult(content = listOf(TextContent(result)))
+                    is List<*> -> {
+                        val textContent = result.filterIsInstance<String>().map { TextContent(it) }
+                        CallToolResult(content = textContent)
+                    }
+                    null -> CallToolResult(content = listOf(TextContent("Operation completed successfully")))
+                    else -> CallToolResult(content = listOf(TextContent(result.toString())))
                 }
-                null -> CallToolResult(content = listOf(TextContent("Operation completed successfully")))
-                else -> CallToolResult(content = listOf(TextContent(result.toString())))
+            } catch (e: Exception) {
+                CallToolResult(
+                    content = listOf(TextContent("Error executing tool: ${e.stackTraceToString()}")),
+                    isError = true
+                )
             }
-        } catch (e: Exception) {
-            CallToolResult(
-                content = listOf(TextContent("Error executing tool: ${e.stackTraceToString()}")),
-                isError = true
-            )
         }
     }
 }
@@ -202,3 +249,4 @@ private fun convertJsonValueToKotlinType(jsonValue: Any?, targetType: KType): An
     // For now, just return the raw JSON value for complex types
     return jsonValue
 }
+
